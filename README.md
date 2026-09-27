@@ -1,3 +1,3 @@
 # NONO Butterfly Door
 
-Static website published with GitHub Pages.
+This repository is reserved for the static website deployment. The website files have not yet been uploaded, and GitHub Pages is not enabled.
