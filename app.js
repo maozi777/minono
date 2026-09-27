@@ -115,7 +115,7 @@ function enterWorld() {
   idleVideo.pause();
   video.pause();
   finaleVideo.pause();
-  window.location.assign('./world/index.html');
+  window.location.assign('./world/index.html?from=door');
 }
 
 function revealWorldThroughButterfly() {
