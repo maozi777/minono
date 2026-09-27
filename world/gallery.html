@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NONO · 音乐小屋</title><link rel="stylesheet" href="./gallery-ui.css">
+<style>
+  html,body{margin:0;padding:0;background:#ffffff;height:100%;overflow:hidden;}
+  body{display:flex;align-items:center;justify-content:center;}
+  #frame{
+    width:100vw;height:100vh;
+    overflow:hidden;background:#ffffff;position:relative;
+    cursor:default;box-sizing:border-box;
+  }
+  canvas{display:block;}
+  /* ===== 用户 Layout 覆盖层（移植自 Layout 组件，浅色背景改用深色字） ===== */
+  [data-layout]{
+    position:absolute; inset:0; z-index:50;
+    padding:40px;
+    font-size:14px; line-height:1.35;
+    color:#141414;                       /* 原组件是白字，本页背景为浅色，改为深色保证可读 */
+    text-transform:uppercase;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    letter-spacing:0.02em;
+    pointer-events:none;                 /* 不遮挡画布交互 */
+    box-sizing:border-box;
+  }
+  [data-layout] .grid6{
+    display:grid; height:100%; width:100%;
+    grid-template-columns:repeat(6,1fr);
+    grid-template-rows:repeat(6,1fr);
+  }
+  [data-layout] .top{
+    grid-column:1/8; height:40px;
+  }
+  [data-layout] .top .cols{
+    display:grid; grid-template-columns:repeat(3,1fr);
+  }
+  [data-layout] .top .c{text-align:center;}
+  [data-layout] .top .r{text-align:right;}
+  [data-layout] .builtby{
+    grid-column:2/3; grid-row:7/8;
+    display:flex; flex-direction:column; justify-content:flex-end;
+  }
+  [data-layout] .socials{
+    grid-row:7/8;
+    display:flex; flex-direction:column; justify-content:flex-end;
+  }
+  [data-layout] .copy{
+    grid-row:7/8; grid-column:7/8;
+    display:flex; flex-direction:column; justify-content:flex-end;
+  }
+  @media (max-width:768px){
+    [data-layout]{padding:20px; font-size:12px;}
+    [data-layout] .builtby{grid-column:3/4;}
+  }
+</style>
+<script type="importmap">{"imports": {"three": "./assets/gallery/three.js"}}</script>
+</head>
+<body>
+<div id="frame"></div>
+<script src="./gallery-audio.js"></script>
+<!-- 用户 Layout 覆盖层（已移除） -->
+<script type="module">
+import * as THREE from './assets/gallery/three.js';
+
+/* ================= 可调参数（都在这） ================= */
+const T = {
+  COUNT: 7,               // CD 唱片数量（与封面数量一致）
+  CASE_S: 2.30,           // CD 盒边长（方形带盖）
+  CASE_R: 0.04,           // 盒子微小圆角
+  ROW_GAP: 1.30,          // 横排间距：16:9下正好平均显示7张
+  ROW_TILT: 0.22,         // 两边CD往镜头方向倾斜的最大比例（0=纯侧边 1=完全正面，不要太多）
+  ROW_PUSH: 1.35,         // 选中转正面时两侧碟让开的距离
+  THICK: 0.18,            // 碟盒厚度（侧面）
+  PARALLAX_X: 0.05,       // 鼠标视差幅度
+  PARALLAX_Y: 0.07,
+  DRAG_SPEED: 0.0045,     // 拖拽旋转灵敏度
+};
+/* 照片路径：换成自己的图片（URL 或 dataURI 都行） */
+const PHOTOS = ["./assets/gallery/cover-0.png", "./assets/gallery/cover-1.png", "./assets/gallery/cover-2.png", "./assets/gallery/cover-3.png", "./assets/gallery/cover-4.png", "./assets/gallery/cover-5.png", "./assets/gallery/cover-6.png"];
+const ARTWORK = [{"cover": [116, 77, 881, 840], "disc": [1060, 511, 382, 398]}, {"cover": [118, 72, 882, 844], "disc": [1057, 507, 373, 399]}, {"cover": [119, 78, 879, 838], "disc": [1063, 511, 379, 398]}, {"cover": [117, 77, 880, 839], "disc": [1064, 509, 379, 397]}, {"cover": [118, 78, 879, 837], "disc": [1061, 511, 382, 398]}, {"cover": [121, 77, 871, 837], "disc": [1056, 510, 376, 398]}, {"cover": [118, 77, 879, 839], "disc": [1063, 510, 381, 398]}];
+
+/* ================= 基础 ================= */
+const frame = document.getElementById('frame');
+let renderer;
+try{renderer=new THREE.WebGLRenderer({antialias:true});}catch(error){
+ frame.className='fallback';
+ PHOTOS.forEach((src,i)=>{const b=document.createElement('button');b.innerHTML=`<img src="${src}" alt="唱片 ${i+1}"><span>选择唱片 ${i+1}</span>`;let selected=false;b.onclick=()=>{if(!selected){frame.querySelectorAll('button').forEach(el=>el.classList.remove('selected','playing'));window.galleryMusic.stop();b.classList.add('selected');selected=true;b.querySelector('span').textContent='再次点击 · 播放唱片';}else{b.classList.toggle('playing');if(b.classList.contains('playing'))window.galleryMusic.play(i);else window.galleryMusic.stop();}};frame.append(b);});
+ document.querySelector('#musicStatus').textContent='当前设备使用简洁唱片模式 · 选择后再次点击播放';
+ throw new Error('3D unavailable; accessible gallery fallback displayed');
+}
+renderer.setClearColor(0xffffff,1);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+frame.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
+camera.position.set(0, 0, 8.2);
+
+const tiltGroup = new THREE.Group();   // 视差 + 拖拽
+tiltGroup.position.set(0, 0.12, 0);    // 横排整体高度（往下微调居中页面）
+scene.add(tiltGroup);
+
+let halfW = 0;   // 半屏宽（世界单位），resize 时更新
+function resize(){
+  const w = frame.clientWidth, h = frame.clientHeight;
+  renderer.setSize(w,h);          // 必须同步CSS尺寸：否则高DPI屏(如125%缩放)画布会超出视口、画面整体偏移
+  camera.aspect = w/h; camera.updateProjectionMatrix();
+  halfW = camera.position.z*Math.tan(THREE.MathUtils.degToRad(camera.fov/2))*camera.aspect;
+}
+new ResizeObserver(resize).observe(frame); resize();
+
+/* ================= 工具 ================= */
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const eioCubic=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+const eoCubic=t=>1-Math.pow(1-t,3);   // 出场即全速、尾段柔和减速，滑入更顺不顿挫
+const sstep=(a,b,t)=>{const x=clamp((t-a)/(b-a),0,1);return x*x*(3-2*x);};
+
+function roundedRectShape(w,h,r){
+  const s=new THREE.Shape(); const x=-w/2,y=-h/2;
+  s.moveTo(x+r,y); s.lineTo(x+w-r,y); s.quadraticCurveTo(x+w,y,x+w,y+r);
+  s.lineTo(x+w,y+h-r); s.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  s.lineTo(x+r,y+h); s.quadraticCurveTo(x,y+h,x,y+h-r);
+  s.lineTo(x,y+r); s.quadraticCurveTo(x,y,x+r,y);
+  return s;
+}
+function buildGeo(w,h,r,depth=T.THICK){          // depth 可自定义：盖子用更薄的厚度
+  const g=new THREE.ExtrudeGeometry(roundedRectShape(w,h,r),
+    {depth,bevelEnabled:false,curveSegments:26});
+  g.translate(0,0,-depth/2);
+  const pos=g.attributes.position, uv=g.attributes.uv;
+  const nrm=g.attributes.normal;
+  for(let i=0;i<uv.count;i++){
+    if(Math.abs(nrm.getZ(i))<0.5)
+      uv.setXY(i,pos.getZ(i)/depth+0.5,pos.getY(i)/h+0.5);   // 侧壁：沿厚度方向展开，碟脊能显示完整竖排文字
+    else
+      uv.setXY(i,pos.getX(i)/w+0.5,pos.getY(i)/h+0.5);         // 正/背面：平面满铺
+  }
+  return g;
+}
+
+/* ================= 卡片 ================= */
+function roundRectPath(g,x,y,w,h,r){
+  g.beginPath();
+  g.moveTo(x+r,y); g.lineTo(x+w-r,y); g.quadraticCurveTo(x+w,y,x+w,y+r);
+  g.lineTo(x+w,y+h-r); g.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  g.lineTo(x+r,y+h); g.quadraticCurveTo(x,y+h,x,y+h-r);
+  g.lineTo(x,y+r); g.quadraticCurveTo(x,y,x+r,y); g.closePath();
+}
+function makeCaseTexture(img,index){
+  /* 专辑封面：图片全包围铺满整个外壳 */
+  const c=document.createElement('canvas'); c.width=c.height=1024;
+  const g=c.getContext('2d');
+  g.drawImage(img,...ARTWORK[index].cover,0,0,1024,1024);
+  // 边缘轻微暗角，让盒子轮廓更立体
+  const vg=g.createRadialGradient(512,512,430,512,512,770);
+  vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.30)');
+  g.fillStyle=vg; g.fillRect(0,0,1024,1024);
+  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=8;
+  return t;
+}
+/* 碟脊：取封面均色压暗打底 + 竖排专辑名（与参考图一致） */
+function makeSpineTexture(img,title,index){
+  const c=document.createElement('canvas'); c.width=128; c.height=1024;
+  const g=c.getContext('2d');
+  const scv=document.createElement('canvas'); scv.width=scv.height=8;
+  scv.getContext('2d').drawImage(img,...ARTWORK[index].cover,0,0,8,8);
+  g.drawImage(scv,0,0,128,1024);
+  g.fillStyle='rgba(0,0,0,0.42)'; g.fillRect(0,0,128,1024);
+  const vg=g.createLinearGradient(0,0,128,0);          // 脊线立体高光
+  vg.addColorStop(0,'rgba(255,255,255,0.14)'); vg.addColorStop(0.5,'rgba(255,255,255,0)');
+  vg.addColorStop(1,'rgba(0,0,0,0.25)');
+  g.fillStyle=vg; g.fillRect(0,0,128,1024);
+  g.save();
+  g.translate(64,512); g.rotate(-Math.PI/2); g.scale(1,-1);  // 竖排从下往上读；scale修正侧壁贴图的镜像
+  g.fillStyle='rgba(255,255,255,0.94)';
+  g.font='500 46px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
+  g.textAlign='center'; g.textBaseline='middle';
+  g.fillText(title,0,0);
+  g.restore();
+  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=8;
+  return t;
+}
+/* 空盒托盘（开盖后盒身显示） */
+function makeTrayTexture(){
+  const c=document.createElement('canvas'); c.width=c.height=1024;
+  const g=c.getContext('2d');
+  roundRectPath(g,6,6,1012,1012,18);          // 托盘同样微小圆角
+  g.fillStyle='#101010'; g.fill();          // 托盘改黑色系
+  g.lineWidth=7; g.strokeStyle='#2e2e2e'; g.stroke();
+  g.strokeStyle='#1e1e1e'; g.lineWidth=3;
+  g.beginPath(); g.moveTo(24,150); g.lineTo(1000,150); g.moveTo(24,874); g.lineTo(1000,874); g.stroke();
+  const cx=512, cy=512;
+  g.beginPath(); g.arc(cx,cy,438,0,7); g.fillStyle='#1c1c1c'; g.fill();        // 托盘凹槽（略亮于底，保持层次）
+  g.beginPath(); g.arc(cx,cy,402,0,7); g.fillStyle='#262626'; g.fill();
+  g.beginPath(); g.arc(cx,cy,438,0,7); g.lineWidth=5; g.strokeStyle='#080808'; g.stroke();
+  g.beginPath(); g.arc(cx,cy,120,0,7); g.fillStyle='#151515'; g.fill();        // 轴座
+  g.beginPath(); g.arc(cx,cy,20,0,7); g.fillStyle='#d8d8d8'; g.fill();
+  for(const [sx,sy] of [[64,64],[960,64],[64,960],[960,960]]){                 // 螺丝
+    g.beginPath(); g.arc(sx,sy,17,0,7); g.fillStyle='#3a3a3a'; g.fill();
+    g.lineWidth=4; g.strokeStyle='#050505'; g.stroke();
+  }
+  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=8;
+  return t;
+}
+/* 抽出来的CD碟片 */
+function makeDiscTexture(img,index){
+  const c=document.createElement('canvas');c.width=c.height=1024;
+  const g=c.getContext('2d');
+  const [cx,cy,rx,ry]=ARTWORK[index].disc;
+  // The reference is photographed as an ellipse. Normalize both axes to
+  // the same 512px radius; reconstruct the occluded half from exposed vinyl.
+  // A circular clip makes the texture boundary concentric with the geometry.
+  g.save();g.beginPath();g.arc(512,512,512,0,Math.PI*2);g.clip();
+  g.drawImage(img,cx,cy-ry,rx,ry*2,512,0,512,1024);
+  g.save();g.translate(1024,0);g.scale(-1,1);
+  g.drawImage(img,cx,cy-ry,rx,ry*2,512,0,512,1024);g.restore();
+  g.restore();
+  g.beginPath();g.arc(512,512,14,0,Math.PI*2);g.fillStyle='#fafafa';g.fill();
+  const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=8;
+  return t;
+}
+
+const cards = [];
+const textureLoads = [];
+/* 碟脊上的竖排专辑名（与10张封面一一对应） */
+const TITLES = ['butterfly door','butterfly door Vol.1','butterfly door Vol.2','butterfly door Vol.3','butterfly door Vol.4','butterfly door Vol.5','butterfly door Vol.6','butterfly door Vol.7','butterfly door Vol.8','butterfly door Vol.9'];
+const TRAY_TEX = makeTrayTexture();
+renderer.initTexture(TRAY_TEX);              // 预上传GPU：开盖瞬间切换贴图不再卡顿
+for(let i=0;i<T.COUNT;i++){
+  const faceMat = new THREE.MeshBasicMaterial({color:0x111111, transparent:true});
+  const sideMat = new THREE.MeshBasicMaterial({color:0x0a0a0a, transparent:true});
+  const img = new Image();
+  img.decoding = 'async';                // 大体积 base64 封面异步解码，避免阻塞主线程造成开场顿挫
+  /* 开盖用的盖子（铰链在左边缘）与抽出的碟片，都挂在碟盒上 */
+  /* 盖子用与盒身相同的圆角矩形挤出几何，开合前后封面圆角一致（铰链在左边缘） */
+  const lidGeo = buildGeo(T.CASE_S, T.CASE_S, T.CASE_R, 0.06);
+  lidGeo.translate(T.CASE_S/2, 0, 0);
+  const lidMat  = new THREE.MeshBasicMaterial({color:0x111111, transparent:true});
+  const lidEdge = new THREE.MeshBasicMaterial({color:0x0d0d0d, transparent:true});
+  const lid = new THREE.Mesh(lidGeo, [lidMat, lidEdge]);   // 挤出几何：0=正/背面，1=侧壁
+  lid.position.set(-T.CASE_S/2, 0, T.THICK/2+0.02);
+  lid.visible = false; lid.raycast=()=>{};   // 不参与点击拾取
+  const discGeo = new THREE.CylinderGeometry(T.CASE_S*0.40, T.CASE_S*0.40, 0.05, 256);
+  discGeo.rotateX(Math.PI/2);
+  const discMat  = new THREE.MeshBasicMaterial({color:0x111111, transparent:true});
+  const discEdge = new THREE.MeshBasicMaterial({color:0x0a0a0a, transparent:true});
+  const disc = new THREE.Mesh(discGeo, [discEdge, discMat, discMat]);
+  disc.position.set(0, 0, T.THICK/2+0.05);
+  disc.visible = false; disc.raycast=()=>{};  // 不参与点击拾取
+  let ready;
+  textureLoads.push(new Promise(resolve=>{ready=resolve}));
+  img.onload = ()=>{
+    faceMat.map = makeCaseTexture(img,i);
+    faceMat.color.set(0xffffff); faceMat.needsUpdate = true;
+    /* 碟脊：封面均色 + 竖排专辑名 */
+    sideMat.map = makeSpineTexture(img, TITLES[i % TITLES.length],i);
+    sideMat.color.set(0xffffff); sideMat.needsUpdate = true;
+    lidMat.map = faceMat.map; lidMat.color.set(0xffffff); lidMat.needsUpdate = true;
+    discMat.map = makeDiscTexture(img,i); discMat.color.set(0xffffff); discMat.needsUpdate = true;
+    renderer.initTexture(faceMat.map);renderer.initTexture(sideMat.map);renderer.initTexture(discMat.map);
+    ready();
+  };
+  img.src = PHOTOS[i % PHOTOS.length];
+  const geo = buildGeo(T.CASE_S,T.CASE_S,T.CASE_R);
+  const mesh = new THREE.Mesh(geo,[faceMat,sideMat]);
+  mesh.add(lid); mesh.add(disc);
+  tiltGroup.add(mesh);
+  cards.push({
+    mesh, faceMat, sideMat, lid, disc, lidMat,
+    cur:new THREE.Vector3(7+i*T.ROW_GAP,0,0),  // 初始排在屏幕右侧外，等待跟随滑入
+    curRotY:-Math.PI/2, curScale:1,
+    faceT:0,                  // 选中后转向正面的程度 0~1
+  });
+  mesh.userData.idx = i;
+  mesh.renderOrder = T.COUNT - i;   // 顺序固定，创建时设一次即可
+}
+const order = [...cards.keys()];
+
+/* ================= 动画状态 ================= */
+let state='entering';            // entering | idle
+let stateT=0;
+/* 无限循环滚动：90°侧边卡（第5张）对准页面中心，左右各三张倾斜 */
+let rowP=4*T.ROW_GAP, rowTarget=4*T.ROW_GAP;   // 第5张正好在世界0点：位置正中且角度精确90°侧边
+let selected=-1;               // 被点击选中、转向正面的那张
+let pushAmt=0, pushX=0, pushVel=0;   // 两侧碟片让位力度（弹簧+硬边界，到位即停有撞墙感）与让位中心
+let play=null;                 // 播放模式：{card,t,dir,from}
+
+function halfVis(){ return halfW; }
+/* 第k张在屏幕上的循环位置（世界单位，范围 -total/2 ~ total/2） */
+function rowX(k, off){
+  const total=T.COUNT*T.ROW_GAP;
+  let x=(k*T.ROW_GAP - off)%total;
+  if(x>total/2)x-=total; else if(x<-total/2)x+=total;   // 收拢到 0 附近，两端自然相接
+  return x;
+}
+/* 横排角度：正中间精确侧边，越往两边越往镜头方向转，但不超过 T.ROW_TILT */
+function rowRotY(x){
+  const t=Math.min(Math.abs(x)/halfVis(),1)*T.ROW_TILT*(x<0?-1:1);  // 镜像倾斜：左边的往右，右边的往左
+  return -Math.atan2(x,camera.position.z) - (Math.PI/2)*(1-t);
+}
+
+/* ================= 交互 ================= */
+const raycaster=new THREE.Raycaster();
+const pointerNDC=new THREE.Vector2(0,0);
+let dragging=false, dragMoved=0, lastX=0, lastY=0;
+let dragRot={x:0,y:0}, dragVel={x:0,y:0};
+let parTarget={x:0,y:0}, parCur={x:0,y:0};
+
+function ndc(e){
+  const r=renderer.domElement.getBoundingClientRect();
+  pointerNDC.set(((e.clientX-r.left)/r.width)*2-1, -((e.clientY-r.top)/r.height)*2+1);
+}
+frame.addEventListener('pointermove',e=>{
+  ndc(e);
+  parTarget.y =  clamp(pointerNDC.x,-1,1)*T.PARALLAX_Y;
+  parTarget.x = -clamp(pointerNDC.y,-1,1)*T.PARALLAX_X;
+  if(dragging){
+    const dx=e.clientX-lastX, dy=e.clientY-lastY;
+    dragMoved += Math.abs(dx)+Math.abs(dy);
+    dragRot.y = clamp(dragRot.y + dx*T.DRAG_SPEED,-0.7,0.7);
+    dragRot.x = clamp(dragRot.x + dy*T.DRAG_SPEED*0.7,-0.35,0.35);
+    dragVel.y = dx*T.DRAG_SPEED; dragVel.x = dy*T.DRAG_SPEED*0.7;
+    lastX=e.clientX; lastY=e.clientY;
+  }
+});
+frame.addEventListener('pointerdown',e=>{
+  dragging=true; dragMoved=0; lastX=e.clientX; lastY=e.clientY;
+});
+addEventListener('pointerup',e=>{
+  if(dragging && dragMoved<6 && state==='idle'){
+    if(play && play.dir>0){
+      ndc(e);raycaster.setFromCamera(pointerNDC,camera);
+      const onRecord=raycaster.intersectObject(play.card.mesh,false).length>0;
+      if(play.stage==='focus' && onRecord){play.stage='open';window.galleryMusic.play(cards.indexOf(play.card));}
+      else if(play.t>=1.35){play.dir=-1;window.galleryMusic.stop();}
+    }
+    else{
+      ndc(e);                                                 // 点击瞬间直接拾取
+      raycaster.setFromCamera(pointerNDC,camera);
+      const hits=raycaster.intersectObjects(cards.map(c=>c.mesh), false);
+      const idx=hits.length? hits[0].object.userData.idx : -1;
+      if(idx<0) selected=-1;                                  // 点空白 = 取消选中
+      else if(idx>=0){                                        // 选择后居中，再点击抽碟
+        const c=cards[idx];
+        selected=-1;
+        c.mesh.renderOrder=T.COUNT+1;                       // 播放时渲染到最上层
+        play={card:c,t:0,dir:1,stage:'focus',from:{pos:c.cur.clone(),rotY:c.curRotY,scale:c.curScale}};
+      }
+      else selected=idx;                                      // 第一次点击 = 选中转向正面
+    }
+  }
+  dragging=false;
+});
+addEventListener("wheel",e=>{
+  e.preventDefault();
+  if(state!=='idle' || play) return;
+  /* 无限循环滚动：不钳制，位置显示时自动首尾相接 */
+  rowTarget+=e.deltaY*0.0036;
+},{passive:false});
+
+/* ================= 主循环 ================= */
+const TMPV=new THREE.Vector3();
+let prev=performance.now();
+
+function tick(now){
+  requestAnimationFrame(tick);
+  const dt=Math.min((now-prev)/1000,0.05); prev=now;
+  stateT+=dt;
+
+  /* 视差 + 拖拽旋转（帧率无关阻尼） */
+  if(!dragging){
+    const vDamp=Math.exp(-dt*6), rDamp=1-Math.exp(-dt*3);
+    dragVel.x*=vDamp; dragVel.y*=vDamp;
+    dragRot.y=clamp(dragRot.y+dragVel.y,-0.7,0.7);
+    dragRot.x=clamp(dragRot.x+dragVel.x,-0.35,0.35);
+    dragRot.x=lerp(dragRot.x,0,rDamp);
+    dragRot.y=lerp(dragRot.y,0,rDamp);
+  }
+  const dPar=1-Math.exp(-dt*4);
+  parCur.x=lerp(parCur.x,parTarget.x,dPar);
+  parCur.y=lerp(parCur.y,parTarget.y,dPar);
+  tiltGroup.rotation.x=parCur.x+dragRot.x;
+  tiltGroup.rotation.y=parCur.y+dragRot.y;
+
+  /* 帧率无关的阻尼插值：低帧率下也不会一顿一顿 */
+  const dRow=1-Math.exp(-dt*8), dCard=1-Math.exp(-dt*10), dFace=1-Math.exp(-dt*9);
+  rowP = lerp(rowP, rowTarget, dRow);
+  tiltGroup.position.y = play ? lerp(0.12,0.0,sstep(0,0.7,play.t)) : 0.12;  // 播放时回到屏幕正中
+
+  if(state==='entering'){
+    /* 开场：整列火车式滑入。链头=k0（槽位在最左、屏幕外），全队从右往左滑，
+       头部滑出左边界，每张都真实滑过屏幕，终点与循环排槽位完全一致 */
+    /* 开场：整列火车式滑入。每张碟走独立的确定性缓动轨道（无帧率阻尼，杜绝卡顿），
+       依次错开出发，越靠后的碟用时略短——随着碟越来越多，速度轻微加快；
+       easeOut 曲线：入场即全速、到位柔和刹停，避免起步-停顿的顿挫感 */
+    const LEAD_DUR=2.4, STAGGER=0.10, ACCEL=0.025;   // ACCEL=每张碟比前一张快2.5%
+    const EXTRA=3*T.ROW_GAP;               // 行程加长：从更右侧滑入，多滑过约3张CD的距离
+    let done=true;
+    for(let jj=0;jj<T.COUNT;jj++){
+      const c=cards[jj];                   // 链顺序即槽位顺序 k=0,1,…,9
+      const dur=LEAD_DUR*(1-ACCEL*jj);
+      const tk=clamp((stateT-jj*STAGGER)/dur,0,1);
+      const e=eoCubic(tk);
+      c.cur.x=lerp(7.0+EXTRA+jj*T.ROW_GAP, -rowTarget+jj*T.ROW_GAP, e);   // 终点即循环槽位，无缝对接
+      c.curRotY=rowRotY(c.cur.x);        // 中间侧边，两边渐倾向镜头
+      if(tk<1) done=false;
+      applyTransform(c);
+    }
+    if(done) state='idle';
+  }
+  else{ /* idle */
+    if(play){
+      /* 播放模式两段式：focus=转正面+前移居中后停靠；open=再点击后开盖+抽碟旋转 */
+      play.t=clamp(play.t+play.dir*dt,0, play.stage==='focus'?0.8:1.4);
+      const pc=play.card;
+      const e1r=sstep(0,0.6,play.t), e1x=sstep(0,0.8,play.t);       // 阶段1：到中心
+      const e2=sstep(0.8,1.1,play.t), e3=sstep(0.85,1.3,play.t);    // 阶段2：开盖 + 抽碟同步
+      const e3a=sstep(0.85,1.1,play.t);                 // 轻微前移出凹槽
+      const e3b=sstep(0.9,1.3,play.t);                  // 往右抽出 + 旋转
+      /* 碟片右抽时盒子同步左移，让「盒+碟」整体构图保持居中 */
+      pc.cur.set(lerp(play.from.pos.x,0,e1x)-T.CASE_S*0.315*e3b,lerp(play.from.pos.y,0,e1x),lerp(play.from.pos.z,2.0,e1r));
+      pc.curRotY=lerp(play.from.rotY,0,e1r);
+      pc.curScale=lerp(play.from.scale,1.05,e1r);
+      applyTransform(pc);
+      pc.lid.visible=e2>0.001;
+      pc.lid.rotation.y=-0.22*e2;                       // 盖子只开一条小缝（参考图：不完全打开，封面透视变化小）
+      /* 贴图切换必须藏在盖子完全盖住盒面的瞬间（e2≈0），否则开/合时盖缝里的画面会闪一下 */
+      if(e2>0.002 && pc.faceMat.map!==TRAY_TEX){ pc.faceMat.map=TRAY_TEX; pc.faceMat.needsUpdate=true; }
+      if(e2<=0.002 && pc.faceMat.map===TRAY_TEX){ pc.faceMat.map=pc.lidMat.map; pc.faceMat.needsUpdate=true; }
+      /* 碟片：先嵌在托盘凹槽里（与凹槽等大），开盖后先往屏幕前移出，再往右抽出——约1/4留在盒内 */
+      pc.disc.visible=e2>0.3;                           // 盖子掀开到一定程度就露出凹槽里的碟片
+      /* 碟片深度夹在盒面与盖子之间：右抽时留在盒内的部分被盖子自然遮挡，不会穿透盖子 */
+      pc.disc.position.set(lerp(0,T.CASE_S*0.64,e3b), 0, T.THICK/2+0.01+0.015*e3a);   // 露出约2/3，留1/3在盒内
+      pc.disc.scale.setScalar(0.5/0.40);                // 直径与盒子等高（半径=CASE_S/2 ÷ 几何半径0.40）
+      pc.disc.rotation.z-=dt*2.8*e3b;   // 持续旋转（先不配音乐）
+      const o=1-sstep(0,0.45,play.t);
+      for(const c of cards){ if(c!==pc){ c.faceMat.opacity=o; c.sideMat.opacity=o; } }
+      if(play.dir<0 && play.t<=0){
+        pc.lid.visible=false; pc.disc.visible=false;
+        pc.mesh.renderOrder=T.COUNT-pc.mesh.userData.idx;   // 恢复排位渲染顺序
+        for(const c of cards){ c.faceMat.opacity=1; c.sideMat.opacity=1; }
+        play=null;
+      }
+    } else {
+      /* 被点击选中的那张：两侧的碟让开。
+         让位力度 pushAmt 用与 faceT 相同的阻尼单独跟随：选中时缓缓升起、取消时同速回落，
+         避免 selected 一清零两边碟片瞬间全速弹回（回位快于弹开的问题） */
+      let selK=-1;
+      if(selected>=0){
+        for(let k2=0;k2<T.COUNT;k2++){
+          if(order[k2]===selected){ selK=k2; pushX=rowX(k2,rowP); break; }
+        }
+      }
+      /* 弹簧让位：快速弹出/收回，到位撞墙硬停；边界钳制防止过冲撞进旁边的碟 */
+      pushVel += ((selK>=0?1:0)-pushAmt)*70*dt;
+      pushVel *= Math.exp(-10*dt);
+      pushAmt += pushVel*dt;
+      if(pushAmt<0){pushAmt=0;pushVel=0;}
+      if(pushAmt>1){pushAmt=1;pushVel=0;}
+      for(let k=0;k<T.COUNT;k++){
+        const c=cards[order[k]];
+        /* 目标：无限循环横排，中间精确侧边，两边渐倾向镜头 */
+        let rx=rowX(k, rowP);
+        if(k!==selK && pushAmt>0.001) rx += (rx<pushX?-1:1)*T.ROW_PUSH*pushAmt;  // 给转向正面的碟让位
+        const tp=TMPV.set(rx, 0, 0);          // 复用临时向量，避免每帧分配
+        let trY=rowRotY(rx);
+        /* 点击选中后：转向正面朝向镜头并前移，露出封面 */
+        c.faceT=lerp(c.faceT, selK===k?1:0, dFace);
+        if(c.faceT>0.001){
+          trY=lerp(trY, 0, c.faceT);      // 摆正到与屏幕平行（不朝相机点倾斜，任何位置选中都是纯正面）
+          tp.z+=c.faceT*0.9;
+        }
+        /* 循环包裹导致目标跳到另一端时直接瞬移，不做横穿屏幕的插值 */
+        if(Math.abs(tp.x-c.cur.x)>T.COUNT*T.ROW_GAP/2) c.cur.x=tp.x;
+        c.cur.lerp(tp,dCard);
+        c.curRotY=lerp(c.curRotY,trY,dCard);
+        c.curScale=lerp(c.curScale,1,dCard);
+        applyTransform(c);
+      }
+    }
+  }
+
+  renderer.render(scene,camera);
+}
+function applyTransform(c){
+  c.mesh.position.copy(c.cur);
+  c.mesh.rotation.y=c.curRotY;
+  c.mesh.scale.setScalar(c.curScale);
+}
+Promise.all(textureLoads).then(()=>{prev=performance.now();requestAnimationFrame(tick)});
+</script>
+</body>
+</html>

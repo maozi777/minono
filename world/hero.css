@@ -1,0 +1,11 @@
+.hero{background:#87c9fb url("./assets/nono-sky.png") center/cover no-repeat}
+.hero-copy{left:4.8%;top:6.8%;width:43%;max-width:620px}
+.hero-logo{width:min(37vw,570px);margin:0 0 2vh}
+.bio{position:relative;width:min(40vw,575px);padding:clamp(28px,3vw,42px) clamp(26px,3.1vw,44px) clamp(23px,2.6vw,36px);border:2px solid rgba(22,62,91,.7);border-radius:18px 7px 20px 9px;background:rgba(255,255,255,.7);box-shadow:7px 8px 0 rgba(247,211,66,.75),0 22px 55px rgba(32,91,133,.14);backdrop-filter:blur(8px);color:#163e5b;font-family:"Hannotate SC","HanziPen SC","STXingkai","Xingkai SC","FZKai-Z03","KaiTi",cursive;font-size:clamp(16px,1.18vw,19px);font-weight:600;line-height:1.6;letter-spacing:.035em;transform:rotate(-.45deg)}
+.bio:before,.bio:after{content:"";position:absolute;width:31px;height:15px;background:rgba(255,241,175,.9);border:1px solid rgba(22,62,91,.22);transform:rotate(-9deg)}
+.bio:before{left:24px;top:-9px}.bio:after{right:25px;bottom:-8px;transform:rotate(8deg)}
+.bio-kicker{position:absolute;right:25px;top:14px;color:#42738f;font:700 10px/1.2 Arial,sans-serif;letter-spacing:.17em}
+.bio p{margin:0 0 1em}.bio p:last-child{margin-bottom:0}.bio strong{display:inline-block;margin-bottom:.1em;color:#103b5c;font-size:1.08em;font-weight:800}.bio-note{padding-top:.85em;border-top:1px dashed rgba(22,62,91,.42);color:#285873;font-size:.92em}
+.hero-character{top:3.5%;right:11.5%;bottom:auto;width:94vw;max-height:none;transform-origin:70% 46%;filter:drop-shadow(0 28px 32px rgba(36,88,120,.18))}
+.loading{background:#87c9fb!important}
+@media(max-width:760px){.hero-copy{left:5%;top:4%;width:90%}.hero-logo{width:70vw;margin-bottom:1.3vh}.bio{width:90vw;padding:25px 18px 18px;font-size:14px;line-height:1.45;background:rgba(255,255,255,.72)}.bio-kicker{right:16px;top:10px}.hero-character{top:27%;right:-21%;width:108vw;opacity:.62}}
