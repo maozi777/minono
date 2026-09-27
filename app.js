@@ -54,7 +54,6 @@ function startIntro() {
   progress.style.width = '0%';
   progressWrap.hidden = true;
   announce('点击 START 气泡，推开蝴蝶门');
-  start.focus({ preventScroll: true });
 }
 
 async function playFinale() {
